@@ -71,6 +71,66 @@ const (
 	LOG_LOCAL7
 )
 
+var priorityList = []Priority{
+	LOG_KERN,
+	LOG_USER,
+	LOG_MAIL,
+	LOG_DAEMON,
+	LOG_AUTH,
+	LOG_SYSLOG,
+	LOG_LPR,
+	LOG_NEWS,
+	LOG_UUCP,
+	LOG_CRON,
+	LOG_AUTHPRIV,
+	LOG_FTP,
+	LOG_LOCAL0,
+	LOG_LOCAL1,
+	LOG_LOCAL2,
+	LOG_LOCAL3,
+	LOG_LOCAL4,
+	LOG_LOCAL5,
+	LOG_LOCAL6,
+	LOG_LOCAL7,
+}
+
+var priorityMap = map[Priority]string{
+	LOG_KERN:     "LOG_KERN",
+	LOG_USER:     "LOG_USER",
+	LOG_MAIL:     "LOG_MAIL",
+	LOG_DAEMON:   "LOG_DAEMON",
+	LOG_AUTH:     "LOG_AUTH",
+	LOG_SYSLOG:   "LOG_SYSLOG",
+	LOG_LPR:      "LOG_LPR",
+	LOG_NEWS:     "LOG_NEWS",
+	LOG_UUCP:     "LOG_UUCP",
+	LOG_CRON:     "LOG_CRON",
+	LOG_AUTHPRIV: "LOG_AUTHPRIV",
+	LOG_FTP:      "LOG_FTP",
+	LOG_LOCAL0:   "LOG_LOCAL0",
+	LOG_LOCAL1:   "LOG_LOCAL1",
+	LOG_LOCAL2:   "LOG_LOCAL2",
+	LOG_LOCAL3:   "LOG_LOCAL3",
+	LOG_LOCAL4:   "LOG_LOCAL4",
+	LOG_LOCAL5:   "LOG_LOCAL5",
+	LOG_LOCAL6:   "LOG_LOCAL6",
+	LOG_LOCAL7:   "LOG_LOCAL7",
+}
+
+func (p Priority) String() string {
+	var b []byte
+	var first bool
+	for _, k := range priorityList {
+		if k&p != 0 {
+			if first {
+				b = append(b, '|')
+			}
+			b = append(b, priorityMap[k]...)
+		}
+	}
+	return string(b)
+}
+
 const maxBufSize = 1024 * 1024 * 20 // 20MB
 
 // A Writer is a connection to a syslog server.
