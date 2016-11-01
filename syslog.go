@@ -11,7 +11,6 @@ import (
 	"log"
 	"net"
 	"os"
-	"strconv"
 	"sync"
 	"time"
 )
@@ -84,9 +83,8 @@ type Writer struct {
 	mu   sync.Mutex // guards conn
 	conn *netConn
 
-	b    []byte // buffer for formatted messages
-	pid  int    // cached process pid
-	bpid []byte
+	b   []byte // buffer for formatted messages
+	pid int    // cached process pid
 }
 
 // This interface and the separate syslog_unix.go file exist for
@@ -260,66 +258,48 @@ func (w *Writer) writeAndRetry(p Priority, s string) (n int, err error) {
 			return
 		}
 	}
-	if err = w.connect(); err != nil {
-		w.mu.Unlock()
-		return
+	if err = w.connect(); err == nil {
+		if msg == nil {
+			msg = w.format(pr, w.hostname, w.tag, s)
+		}
+		n, err = w.conn.write(msg)
 	}
-	if msg == nil {
-		msg = w.format(pr, w.hostname, w.tag, s)
-	}
-	n, err = w.conn.write(msg)
 	w.mu.Unlock()
 	return
 }
 
 // func (w *Writer) getpid() int {
-func (w *Writer) getpid() []byte {
+func (w *Writer) getpid() int {
 	if w.pid == 0 {
 		w.pid = os.Getpid()
-		w.bpid = strconv.AppendInt(make([]byte, 0, 8), int64(w.pid), 10)
 	}
-	return w.bpid
+	return w.pid
 }
 
-func formatBits(dst []byte, u uint64) []byte {
-	const digits = "0123456789abcdefghijklmnopqrstuvwxyz"
-
-	var a [64]byte // +1 for sign of 64bit value in base 2
+// itoa, cheap integer to fixed-width decimal ASCII.
+func itoa(dst []byte, n int) []byte {
+	var a [20]byte
 	i := len(a)
-
-	if ^uintptr(0)>>32 == 0 {
-		for u > uint64(^uintptr(0)) {
-			q := u / 1e9
-			us := uintptr(u - q*1e9) // us % 1e9 fits into a uintptr
-			for j := 9; j > 0; j-- {
-				i--
-				qs := us / 10
-				a[i] = byte(us - qs*10 + '0')
-				us = qs
-			}
-			u = q
-		}
-	}
-
-	// u guaranteed to fit into a uintptr
-	us := uintptr(u)
+	us := uintptr(n)
 	for us >= 10 {
 		i--
 		q := us / 10
 		a[i] = byte(us - q*10 + '0')
 		us = q
 	}
-	// u < 10
 	i--
 	a[i] = byte(us + '0')
-
 	return append(dst, a[i:]...)
+}
+
+func (w *Writer) name(t time.Time) {
+	t.Zone()
 }
 
 func (w *Writer) format(p Priority, hostname, tag, msg string) []byte {
 	b := w.b[0:0]
 	b = append(b, '<')
-	b = formatBits(b, uint64(p))
+	b = itoa(b, int(p))
 	b = append(b, '>')
 	b = time.Now().AppendFormat(b, time.RFC3339)
 	b = append(b, ' ')
@@ -327,10 +307,7 @@ func (w *Writer) format(p Priority, hostname, tag, msg string) []byte {
 	b = append(b, ' ')
 	b = append(b, tag...)
 	b = append(b, '[')
-
-	b = append(b, w.getpid()...)
-	// b = strconv.AppendInt(b, int64(w.getpid()), 10)
-
+	b = itoa(b, w.getpid())
 	b = append(b, "]: "...)
 	b = append(b, msg...)
 	if b[len(b)-1] != '\n' {
