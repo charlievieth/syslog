@@ -138,12 +138,13 @@ func Dial(network, raddr string, priority Priority, tag string) (*Writer, error)
 	}
 
 	w.mu.Lock()
-	defer w.mu.Unlock()
 
 	err := w.connect()
 	if err != nil {
+		w.mu.Unlock()
 		return nil, err
 	}
+	w.mu.Unlock()
 	return w, err
 }
 
@@ -180,16 +181,15 @@ func (w *Writer) Write(b []byte) (int, error) {
 }
 
 // Close closes a connection to the syslog daemon.
-func (w *Writer) Close() error {
+func (w *Writer) Close() (err error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
 	if w.conn != nil {
-		err := w.conn.close()
+		err = w.conn.close()
 		w.conn = nil
-		return err
 	}
-	return nil
+	return err
 }
 
 // Emerg logs a message with severity LOG_EMERG, ignoring the severity
