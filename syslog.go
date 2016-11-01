@@ -71,66 +71,6 @@ const (
 	LOG_LOCAL7
 )
 
-var priorityList = []Priority{
-	LOG_KERN,
-	LOG_USER,
-	LOG_MAIL,
-	LOG_DAEMON,
-	LOG_AUTH,
-	LOG_SYSLOG,
-	LOG_LPR,
-	LOG_NEWS,
-	LOG_UUCP,
-	LOG_CRON,
-	LOG_AUTHPRIV,
-	LOG_FTP,
-	LOG_LOCAL0,
-	LOG_LOCAL1,
-	LOG_LOCAL2,
-	LOG_LOCAL3,
-	LOG_LOCAL4,
-	LOG_LOCAL5,
-	LOG_LOCAL6,
-	LOG_LOCAL7,
-}
-
-var priorityMap = map[Priority]string{
-	LOG_KERN:     "LOG_KERN",
-	LOG_USER:     "LOG_USER",
-	LOG_MAIL:     "LOG_MAIL",
-	LOG_DAEMON:   "LOG_DAEMON",
-	LOG_AUTH:     "LOG_AUTH",
-	LOG_SYSLOG:   "LOG_SYSLOG",
-	LOG_LPR:      "LOG_LPR",
-	LOG_NEWS:     "LOG_NEWS",
-	LOG_UUCP:     "LOG_UUCP",
-	LOG_CRON:     "LOG_CRON",
-	LOG_AUTHPRIV: "LOG_AUTHPRIV",
-	LOG_FTP:      "LOG_FTP",
-	LOG_LOCAL0:   "LOG_LOCAL0",
-	LOG_LOCAL1:   "LOG_LOCAL1",
-	LOG_LOCAL2:   "LOG_LOCAL2",
-	LOG_LOCAL3:   "LOG_LOCAL3",
-	LOG_LOCAL4:   "LOG_LOCAL4",
-	LOG_LOCAL5:   "LOG_LOCAL5",
-	LOG_LOCAL6:   "LOG_LOCAL6",
-	LOG_LOCAL7:   "LOG_LOCAL7",
-}
-
-func (p Priority) String() string {
-	var b []byte
-	var first bool
-	for _, k := range priorityList {
-		if k&p != 0 {
-			if first {
-				b = append(b, '|')
-			}
-			b = append(b, priorityMap[k]...)
-		}
-	}
-	return string(b)
-}
-
 const maxBufSize = 1024 * 1024 * 20 // 20MB
 
 // A Writer is a connection to a syslog server.
@@ -144,8 +84,9 @@ type Writer struct {
 	mu   sync.Mutex // guards conn
 	conn *netConn
 
-	b   []byte // buffer for formatted messages
-	pid int    // cached process pid
+	b    []byte // buffer for formatted messages
+	pid  int    // cached process pid
+	bpid []byte
 }
 
 // This interface and the separate syslog_unix.go file exist for
@@ -307,39 +248,78 @@ func (w *Writer) Debug(m string) error {
 	return err
 }
 
-func (w *Writer) writeAndRetry(p Priority, s string) (int, error) {
+func (w *Writer) writeAndRetry(p Priority, s string) (n int, err error) {
 	pr := (w.priority & facilityMask) | (p & severityMask)
+	var msg []byte
 
 	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	var msg []byte
 	if w.conn != nil {
 		msg = w.format(pr, w.hostname, w.tag, s)
-		if n, err := w.conn.write(msg); err == nil {
-			return n, err
+		if n, err = w.conn.write(msg); err == nil {
+			w.mu.Unlock()
+			return
 		}
 	}
-	if err := w.connect(); err != nil {
-		return 0, err
+	if err = w.connect(); err != nil {
+		w.mu.Unlock()
+		return
 	}
 	if msg == nil {
 		msg = w.format(pr, w.hostname, w.tag, s)
 	}
-	return w.conn.write(msg)
+	n, err = w.conn.write(msg)
+	w.mu.Unlock()
+	return
 }
 
-func (w *Writer) getpid() int {
+// func (w *Writer) getpid() int {
+func (w *Writer) getpid() []byte {
 	if w.pid == 0 {
 		w.pid = os.Getpid()
+		w.bpid = strconv.AppendInt(make([]byte, 0, 8), int64(w.pid), 10)
 	}
-	return w.pid
+	return w.bpid
+}
+
+func formatBits(dst []byte, u uint64) []byte {
+	const digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+	var a [64]byte // +1 for sign of 64bit value in base 2
+	i := len(a)
+
+	if ^uintptr(0)>>32 == 0 {
+		for u > uint64(^uintptr(0)) {
+			q := u / 1e9
+			us := uintptr(u - q*1e9) // us % 1e9 fits into a uintptr
+			for j := 9; j > 0; j-- {
+				i--
+				qs := us / 10
+				a[i] = byte(us - qs*10 + '0')
+				us = qs
+			}
+			u = q
+		}
+	}
+
+	// u guaranteed to fit into a uintptr
+	us := uintptr(u)
+	for us >= 10 {
+		i--
+		q := us / 10
+		a[i] = byte(us - q*10 + '0')
+		us = q
+	}
+	// u < 10
+	i--
+	a[i] = byte(us + '0')
+
+	return append(dst, a[i:]...)
 }
 
 func (w *Writer) format(p Priority, hostname, tag, msg string) []byte {
 	b := w.b[0:0]
 	b = append(b, '<')
-	b = strconv.AppendInt(b, int64(p), 10)
+	b = formatBits(b, uint64(p))
 	b = append(b, '>')
 	b = time.Now().AppendFormat(b, time.RFC3339)
 	b = append(b, ' ')
@@ -347,7 +327,10 @@ func (w *Writer) format(p Priority, hostname, tag, msg string) []byte {
 	b = append(b, ' ')
 	b = append(b, tag...)
 	b = append(b, '[')
-	b = strconv.AppendInt(b, int64(w.getpid()), 10)
+
+	b = append(b, w.getpid()...)
+	// b = strconv.AppendInt(b, int64(w.getpid()), 10)
+
 	b = append(b, "]: "...)
 	b = append(b, msg...)
 	if b[len(b)-1] != '\n' {

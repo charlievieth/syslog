@@ -391,17 +391,6 @@ func TestConcurrentReconnect(t *testing.T) {
 	}
 }
 
-// type Conn interface {
-// 	Read(b []byte) (n int, err error)
-// 	Write(b []byte) (n int, err error)
-// 	Close() error
-// 	LocalAddr() net.Addr
-// 	RemoteAddr() net.Addr
-// 	SetDeadline(t time.Time) error
-// 	SetReadDeadline(t time.Time) error
-// 	SetWriteDeadline(t time.Time) error
-// }
-
 type noopConn struct{}
 
 func (c *noopConn) Read(b []byte) (int, error)         { return len(b), nil }
